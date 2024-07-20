@@ -121,23 +121,28 @@ app.get('/img-docs/:fileId', async (req, res) => {
     try {
         const { fileId } = req.params;
 
-        const fileUrl = `https://api.telegram.org/file/bot${token}/${fileId}`;
-        const fileInfo = await axios.get(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`);
-        const filePath = fileInfo.data.result.file_path;
-        const fileStreamUrl = `https://api.telegram.org/file/bot${token}/${filePath}`;
+        // Fetch file information from Telegram
+        const fileInfoResponse = await axios.get(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`);
+        if (!fileInfoResponse.data.ok) {
+            return res.status(400).send('Invalid file ID.');
+        }
 
-        axios({
-            url: fileStreamUrl,
+        const filePath = fileInfoResponse.data.result.file_path;
+        const fileUrl = `https://api.telegram.org/file/bot${token}/${filePath}`;
+
+        // Fetch the file from Telegram
+        const fileResponse = await axios({
+            url: fileUrl,
             method: 'GET',
             responseType: 'stream'
-        }).then(response => {
-            res.setHeader('Content-Type', response.headers['content-type']);
-            res.setHeader('Content-Disposition', `attachment; filename=${path.basename(filePath)}`);
-            response.data.pipe(res);
-        }).catch(err => {
-            console.error('Error fetching file from Telegram:', err);
-            res.status(500).send('Failed to fetch file from Telegram.');
         });
+
+        res.setHeader('Content-Type', fileResponse.headers['content-type']);
+        res.setHeader('Content-Disposition', `attachment; filename=${path.basename(filePath)}`);
+
+        // Pipe the file stream to the response
+        fileResponse.data.pipe(res);
+
     } catch (err) {
         console.error('Error fetching file:', err);
         res.status(500).send('Internal server error.');
