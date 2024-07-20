@@ -230,7 +230,7 @@ app.get('/file', async (req, res) => {
         const file = await axios.get(`https://api.telegram.org/bot${token}/getFile?file_id=${file_id}`);
         const filePath = file.data.result.file_path;
         const filedata = await axios.get(`https://api.telegram.org/file/bot${token}/${filePath}`, { responseType: 'arraybuffer' });
-        const outputpath = `${uuid}.mp4`;
+        const outputpath = `${uuid}.${path.extname(filePath)}`;
         const outputFilePath = path.resolve(__dirname, 'input', outputpath); // Ensure the path is absolute
 
         fs.writeFileSync(outputFilePath, filedata.data);
