@@ -67,7 +67,82 @@ function splitVideo(inputPath, chunkSizeMB) {
         });
     });
 }
+app.post('/img-docs', async (req, res) => {
+    try {
+        if (!req.files || !req.files.file) {
+            return res.status(400).send('No files were uploaded.');
+        }
 
+        const file = req.files.file;
+
+        if (file.size > 20 * 1024 * 1024) { // Check file size limit
+            return res.status(400).send('File is too big.');
+        }
+
+        const fileExtension = file.name.split('.').pop();
+        const uuid = uuidv4();
+        const fileName = `${uuid}.${fileExtension}`;
+        const filePath = path.join(__dirname, fileName);
+        if (!file.mimetype.startsWith('image/') && file.mimetype !== 'application/pdf') {
+            return res.status(400).send('No files were uploaded.');
+        }
+        fs.writeFile(filePath, file.data, async (err) => {
+            if (err) {
+                console.error('Error saving file:', err);
+                return res.status(500).send('Failed to save file.');
+            }
+
+            try {
+                let response;
+                if (file.mimetype.startsWith('image/')) {
+                    response = await bot.sendPhoto(chatId, filePath);
+                    response.url = response.photo[0].file_id
+                } else if (file.mimetype === 'application/pdf') {
+                    response = await bot.sendDocument(chatId, filePath);
+                    response.url = response.document.thumbnail.file_id
+                } else {
+                    return res.status(400).send('Unsupported file type.');
+                }
+                fs.unlink(filePath, () => { });
+                res.send(`http://save.ilmlar.com/${response.url}`);
+            } catch (err) {
+                console.error('Error sending file to Telegram:', err);
+                fs.unlink(filePath, () => { });
+                res.status(500).send('Failed to send file to Telegram.');
+            }
+        });
+    } catch (err) {
+        console.error('Error handling file upload:', err);
+        res.status(500).send('Internal server error.');
+    }
+});
+
+app.get('/img-docs/:fileId', async (req, res) => {
+    try {
+        const { fileId } = req.params;
+
+        const fileUrl = `https://api.telegram.org/file/bot${token}/${fileId}`;
+        const fileInfo = await axios.get(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`);
+        const filePath = fileInfo.data.result.file_path;
+        const fileStreamUrl = `https://api.telegram.org/file/bot${token}/${filePath}`;
+
+        axios({
+            url: fileStreamUrl,
+            method: 'GET',
+            responseType: 'stream'
+        }).then(response => {
+            res.setHeader('Content-Type', response.headers['content-type']);
+            res.setHeader('Content-Disposition', `attachment; filename=${path.basename(filePath)}`);
+            response.data.pipe(res);
+        }).catch(err => {
+            console.error('Error fetching file from Telegram:', err);
+            res.status(500).send('Failed to fetch file from Telegram.');
+        });
+    } catch (err) {
+        console.error('Error fetching file:', err);
+        res.status(500).send('Internal server error.');
+    }
+});
 app.post('/file', async (req, res) => {
     try {
         if (!req.files || !req.files.video) {
@@ -153,10 +228,10 @@ app.get('/file', async (req, res) => {
         const outputpath = `${uuid}.mp4`;
         const outputFilePath = path.resolve(__dirname, 'input', outputpath); // Ensure the path is absolute
 
-       fs.writeFileSync(outputFilePath, filedata.data);
+        fs.writeFileSync(outputFilePath, filedata.data);
 
         res.sendFile(outputFilePath, (err) => {
-            fs.unlink(outputFilePath,()=>{})
+            fs.unlink(outputFilePath, () => { })
             if (err) {
                 console.error('Error sending file:', err);
                 res.status(500).json({ error: 'Failed to send file' });
