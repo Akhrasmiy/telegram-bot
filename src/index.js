@@ -104,7 +104,7 @@ app.post('/img-docs', async (req, res) => {
                     return res.status(400).send('Unsupported file type.');
                 }
                 fs.unlink(filePath, () => { });
-                res.send(`http://save.ilmlar.com/img-docs/file_id=${response.url}`);
+                res.send(`http://save.ilmlar.com/img-docs/${response.url}`);
             } catch (err) {
                 console.error('Error sending file to Telegram:', err);
                 fs.unlink(filePath, () => { });
