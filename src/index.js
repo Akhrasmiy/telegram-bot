@@ -234,9 +234,9 @@ app.get('/file', async (req, res) => {
         const outputFilePath = path.resolve(__dirname, 'input', outputpath); // Ensure the path is absolute
 
         fs.writeFileSync(outputFilePath, filedata.data);
-
+console.log(outputFilePath)
         res.sendFile(outputFilePath, (err) => {
-            fs.unlink(outputFilePath, () => { })
+            // fs.unlink(outputFilePath, () => { })
             if (err) {
                 console.error('Error sending file:', err);
                 res.status(500).json({ error: 'Failed to send file' });
