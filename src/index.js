@@ -121,7 +121,7 @@ app.get('/img-docs/:fileId', async (req, res) => {
     try {
         const { fileId } = req.params;
 
-        // Fetch file information from Telegram
+        // Telegram API orqali fayl ma'lumotini olish
         const fileInfoResponse = await axios.get(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`);
         if (!fileInfoResponse.data.ok) {
             return res.status(400).send('Invalid file ID.');
@@ -130,18 +130,19 @@ app.get('/img-docs/:fileId', async (req, res) => {
         const filePath = fileInfoResponse.data.result.file_path;
         const fileUrl = `https://api.telegram.org/file/bot${token}/${filePath}`;
 
-        // Fetch the file from Telegram
+        // Telegramdan faylni yuklash
         const fileResponse = await axios({
             url: fileUrl,
             method: 'GET',
             responseType: 'stream'
         });
 
+        // Faylning MIME turini aniqlash
         const mimeType = fileResponse.headers['content-type'];
         res.setHeader('Content-Type', mimeType);
-        res.setHeader('Content-Disposition', `attachment; filename=${path.basename(filePath)}`);        
+        res.setHeader('Content-Disposition', `attachment; filename=${path.basename(filePath)}`);
 
-        // Pipe the file stream to the response
+        // Faylni oqim orqali jo'natish
         fileResponse.data.pipe(res);
 
     } catch (err) {
