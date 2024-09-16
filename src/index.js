@@ -120,7 +120,7 @@ app.post('/img-docs', async (req, res) => {
 app.get('/img-docs/:fileId', async (req, res) => {
     try {
         const { fileId } = req.params;
-
+        const tempDir = path.join(__dirname, 'src','input');
         // Telegram API orqali fayl ma'lumotini olish
         const fileInfoResponse = await axios.get(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`);
         if (!fileInfoResponse.data.ok) {
@@ -130,19 +130,40 @@ app.get('/img-docs/:fileId', async (req, res) => {
         const filePath = fileInfoResponse.data.result.file_path;
         const fileUrl = `https://api.telegram.org/file/bot${token}/${filePath}`;
 
-        // Telegramdan faylni yuklash
+        // Faylni vaqtinchalik saqlash uchun lokal yo'l
+        const tempFilePath = path.join(tempDir, path.basename(filePath));
+
+        // Faylni yuklash va vaqtinchalik katalogga saqlash
         const fileResponse = await axios({
             url: fileUrl,
-            method: 'GET'
+            method: 'GET',
+            responseType: 'stream'
         });
 
-        // Faylning MIME turini aniqlash
-        const mimeType = fileResponse.headers['content-type'];
-        res.setHeader('Content-Type', mimeType);
-        res.setHeader('Content-Disposition', `attachment; filename=${path.basename(filePath)}`);
+        const writer = fs.createWriteStream(tempFilePath);
+        fileResponse.data.pipe(writer);
 
-        // Faylni oqim orqali jo'natish
-        fileResponse.data.pipe(res);
+        writer.on('finish', () => {
+            // Faylni jo'natish
+            res.sendFile(tempFilePath, err => {
+                if (err) {
+                    console.error('Error sending file:', err);
+                    return res.status(500).send('Error sending file.');
+                }
+
+                // Faylni jo'natib bo'lgandan keyin faylni o'chirish
+                fs.unlink(tempFilePath, unlinkErr => {
+                    if (unlinkErr) {
+                        console.error('Error deleting file:', unlinkErr);
+                    }
+                });
+            });
+        });
+
+        writer.on('error', err => {
+            console.error('Error writing file:', err);
+            res.status(500).send('Error writing file.');
+        });
 
     } catch (err) {
         console.error('Error fetching file:', err);
