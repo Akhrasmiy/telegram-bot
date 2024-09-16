@@ -133,8 +133,7 @@ app.get('/img-docs/:fileId', async (req, res) => {
         // Telegramdan faylni yuklash
         const fileResponse = await axios({
             url: fileUrl,
-            method: 'GET',
-            responseType: 'stream'
+            method: 'GET'
         });
 
         // Faylning MIME turini aniqlash
