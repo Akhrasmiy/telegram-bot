@@ -137,8 +137,9 @@ app.get('/img-docs/:fileId', async (req, res) => {
             responseType: 'stream'
         });
 
-        res.setHeader('Content-Type', fileResponse.headers['content-type']);
-        res.setHeader('Content-Disposition', `attachment; filename=${path.basename(filePath)}`);
+        const mimeType = fileResponse.headers['content-type'];
+        res.setHeader('Content-Type', mimeType);
+        res.setHeader('Content-Disposition', `attachment; filename=${path.basename(filePath)}`);        
 
         // Pipe the file stream to the response
         fileResponse.data.pipe(res);
