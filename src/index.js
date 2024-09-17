@@ -121,18 +121,33 @@ app.get('/img-docs/:file_id', async (req, res) => {
     try {
         const { file_id } = req.params;
 
-        const uuid = uuidv4();
-        const file = await axios.get(`https://api.telegram.org/bot${token}/getFile?file_id=${file_id}`);
-        const filePath = file.data.result.file_path;
-        let extension = filePath.split('.').pop();
-        const filedata = await axios.get(`https://api.telegram.org/file/bot${token}/${filePath}`, { responseType: 'arraybuffer' });
-        const outputpath = `${uuid}.${extension}`;
-        const outputFilePath = path.resolve(__dirname, 'input', outputpath); // Ensure the path is absolute
+        // Step 1: Fetch the file path from Telegram using the file_id
+        const fileResponse = await axios.get(`https://api.telegram.org/bot${token}/getFile?file_id=${file_id}`);
+        
+        if (!fileResponse.data.result) {
+            return res.status(404).json({ error: 'File not found' });
+        }
 
-        fs.writeFileSync(outputFilePath, filedata.data);
-        console.log(outputFilePath)
+        const filePath = fileResponse.data.result.file_path;
+        const extension = filePath.split('.').pop(); // Extract the extension
+
+        // Step 2: Download the file from the Telegram API
+        const fileDataResponse = await axios.get(`https://api.telegram.org/file/bot${token}/${filePath}`, { responseType: 'arraybuffer' });
+
+        // Step 3: Generate a unique file name and store the file
+        const uuid = uuidv4();
+        const outputFilePath = path.resolve(__dirname, 'input', `${uuid}.${extension}`);
+
+        fs.writeFileSync(outputFilePath, fileDataResponse.data);
+        console.log(`File saved at: ${outputFilePath}`);
+
+        // Step 4: Serve the file to the client
         res.sendFile(outputFilePath, (err) => {
-            fs.unlink(outputFilePath, () => { })
+            // Delete the file after sending it to the client
+            fs.unlink(outputFilePath, (unlinkErr) => {
+                if (unlinkErr) console.error('Error deleting file:', unlinkErr);
+            });
+
             if (err) {
                 console.error('Error sending file:', err);
                 res.status(500).json({ error: 'Failed to send file' });
@@ -141,7 +156,7 @@ app.get('/img-docs/:file_id', async (req, res) => {
 
     } catch (err) {
         console.error('Error fetching file:', err);
-        res.status(500).send('Internal server error.');
+        res.status(500).json({ error: 'Internal server error.' });
     }
 });
 app.post('/file', async (req, res) => {
