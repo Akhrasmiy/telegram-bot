@@ -228,7 +228,7 @@ app.get('/file', async (req, res) => {
         const outputpath = `${uuid}.mp4`;
         const outputFilePath = path.resolve(__dirname, 'input', outputpath); // Ensure the path is absolute
 
-        fs.writeFileSync(outputFilePath, filedata.data);
+        fs.writeFile(outputFilePath, filedata.data);
         console.log(outputFilePath)
         res.sendFile(outputFilePath, (err) => {
             fs.unlink(outputFilePath, () => { })
