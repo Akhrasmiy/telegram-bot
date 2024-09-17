@@ -117,31 +117,26 @@ app.post('/img-docs', async (req, res) => {
     }
 });
 
-app.get('/img-docs/:fileId', async (req, res) => {
+app.get('/img-docs/:file_id', async (req, res) => {
     try {
-        const { fileId } = req.params;
+        const { file_id } = req.params;
 
-        // Fetch file information from Telegram
-        const fileInfoResponse = await axios.get(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`);
-        if (!fileInfoResponse.data.ok) {
-            return res.status(400).send('Invalid file ID.');
-        }
+        const uuid = uuidv4();
+        const file = await axios.get(`https://api.telegram.org/bot${token}/getFile?file_id=${file_id}`);
+        const filePath = file.data.result.file_path;
+        const filedata = await axios.get(`https://api.telegram.org/file/bot${token}/${filePath}`, { responseType: 'arraybuffer' });
+        const outputpath = `${uuid}.jpg`;
+        const outputFilePath = path.resolve(__dirname, 'input', outputpath); // Ensure the path is absolute
 
-        const filePath = fileInfoResponse.data.result.file_path;
-        const fileUrl = `https://api.telegram.org/file/bot${token}/${filePath}`;
-
-        // Fetch the file from Telegram
-        const fileResponse = await axios({
-            url: fileUrl,
-            method: 'GET',
-            responseType: 'stream'
+        fs.writeFileSync(outputFilePath, filedata.data);
+        console.log(outputFilePath)
+        res.sendFile(outputFilePath, (err) => {
+            fs.unlink(outputFilePath, () => { })
+            if (err) {
+                console.error('Error sending file:', err);
+                res.status(500).json({ error: 'Failed to send file' });
+            }
         });
-
-        res.setHeader('Content-Type', fileResponse.headers['content-type']);
-        res.setHeader('Content-Disposition', `attachment; filename=${path.basename(filePath)}`);
-
-        // Pipe the file stream to the response
-        fileResponse.data.pipe(res);
 
     } catch (err) {
         console.error('Error fetching file:', err);
