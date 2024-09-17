@@ -124,8 +124,9 @@ app.get('/img-docs/:file_id', async (req, res) => {
         const uuid = uuidv4();
         const file = await axios.get(`https://api.telegram.org/bot${token}/getFile?file_id=${file_id}`);
         const filePath = file.data.result.file_path;
+        let extension = filePath.split('.').pop();
         const filedata = await axios.get(`https://api.telegram.org/file/bot${token}/${filePath}`, { responseType: 'arraybuffer' });
-        const outputpath = `${uuid}.wb`;
+        const outputpath = `${uuid}.${extension}`;
         const outputFilePath = path.resolve(__dirname, 'input', outputpath); // Ensure the path is absolute
 
         fs.writeFileSync(outputFilePath, filedata.data);
