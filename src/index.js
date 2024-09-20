@@ -82,7 +82,7 @@ app.post('/img-docs', async (req, res) => {
         const fileExtension = file.name.split('.').pop();
         const uuid = uuidv4();
         const fileName = `${uuid}.${fileExtension}`;
-        const filePath = path.join(__dirname, fileName);
+        const filePath = path.join(__dirname,'input', fileName);
         if (!file.mimetype.startsWith('image/') && file.mimetype !== 'application/pdf') {
             return res.status(400).send('No files were uploaded.');
         }
@@ -96,7 +96,8 @@ app.post('/img-docs', async (req, res) => {
                 let response;
                 if (file.mimetype.startsWith('image/')) {
                     response = await bot.sendPhoto(chatId, filePath);
-                    response.url = response.photo[0].file_id
+                    console.log(response.photo)
+                    response.url = response.photo.at(-1).file_id
                 } else if (file.mimetype === 'application/pdf') {
                     response = await bot.sendDocument(chatId, filePath);
                     response.url = response.document.thumbnail.file_id
