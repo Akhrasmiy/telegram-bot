@@ -28,6 +28,17 @@ app.use(fileUpload({
 }));
 
 
+async function getVideoDuration(filePath) {
+    return new Promise((resolve, reject) => {
+        ffmpeg.ffprobe(filePath, (err, metadata) => {
+            if (err) {
+                return reject(err);
+            }
+            const duration = metadata.format.duration; // davomiylikni olish
+            resolve(duration);
+        });
+    });
+}
 
 function splitVideo(inputPath, chunkSizeMB) {
     return new Promise((resolve, reject) => {
@@ -82,7 +93,7 @@ app.post('/img-docs', async (req, res) => {
         const fileExtension = file.name.split('.').pop();
         const uuid = uuidv4();
         const fileName = `${uuid}.${fileExtension}`;
-        const filePath = path.join(__dirname,'input', fileName);
+        const filePath = path.join(__dirname, 'input', fileName);
         if (!file.mimetype.startsWith('image/') && file.mimetype !== 'application/pdf') {
             return res.status(400).send('No files were uploaded.');
         }
@@ -124,7 +135,7 @@ app.get('/img-docs/:file_id', async (req, res) => {
 
         // Step 1: Fetch the file path from Telegram using the file_id
         const fileResponse = await axios.get(`https://api.telegram.org/bot${token}/getFile?file_id=${file_id}`);
-        
+
         if (!fileResponse.data.result) {
             return res.status(404).json({ error: 'File not found' });
         }
@@ -191,9 +202,12 @@ app.post('/file', async (req, res) => {
                     const chunk = chunks[i];
                     try {
                         const response = await bot.sendVideo(chatId, chunk);
-                        console.log('Video sent:', response);
+                        // console.log('Video sent:', response);
+                        const duration =(await getVideoDuration(chunk))
+
                         arr.push(response.video.file_id);
-                        await File.create({ uuid: uuid, file_id: response.video.file_id });
+                        // console.log(chunk) 
+                        await File.create({ uuid: uuid, file_id: response.video.file_id, duration: duration })
                         fs.unlink(chunk, () => { });
                     } catch (err) {
                         console.error('Error sending video to Telegram:', err);
@@ -225,7 +239,7 @@ app.get('/video', async (req, res) => {
         const arr = []
         for (let i = 0; i < files.length; i++) {
             const file_id = files[i].file_id;
-            arr.push(`http://save.ilmlar.com/file?file_id=${file_id}`)
+            arr.push({ url: `http://save.ilmlar.com/file?file_id=${file_id}`, duration: files[i].duration })
         }
 
         res.send(arr)

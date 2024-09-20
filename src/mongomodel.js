@@ -9,7 +9,11 @@ const fileSchema = new mongoose.Schema(
         file_id: {
             type: mongoose.SchemaTypes.String,
             required: true,
-        }
+        },
+        duration:{
+            type: mongoose.SchemaTypes.Number,
+            required: false,
+        },
     },
     {
         timestamps: {
