@@ -136,7 +136,7 @@ app.get('/img-docs/:file_id', async (req, res) => {
         // Step 1: Fetch the file path from Telegram using the file_id
         const fileResponse = await axios.get(`https://api.telegram.org/bot${token}/getFile?file_id=${file_id}`);
 
-        if (!fileResponse.data.result) {
+        if (!fileResponse.data || !fileResponse.data.result) {
             return res.status(404).json({ error: 'File not found' });
         }
 
@@ -146,14 +146,20 @@ app.get('/img-docs/:file_id', async (req, res) => {
         // Step 2: Download the file from the Telegram API
         const fileDataResponse = await axios.get(`https://api.telegram.org/file/bot${token}/${filePath}`, { responseType: 'arraybuffer' });
 
-        // Step 3: Generate a unique file name and store the file
+        // Step 3: Ensure the 'input' directory exists
+        const inputDir = path.resolve(__dirname, 'input');
+        if (!fs.existsSync(inputDir)) {
+            fs.mkdirSync(inputDir, { recursive: true });
+        }
+
+        // Step 4: Generate a unique file name and store the file
         const uuid = uuidv4();
-        const outputFilePath = path.resolve(__dirname, 'input', `${uuid}.${extension}`);
+        const outputFilePath = path.resolve(inputDir, `${uuid}.${extension}`);
 
         fs.writeFileSync(outputFilePath, fileDataResponse.data);
         console.log(`File saved at: ${outputFilePath}`);
 
-        // Step 4: Serve the file to the client
+        // Step 5: Serve the file to the client
         res.sendFile(outputFilePath, (err) => {
             // Delete the file after sending it to the client
             fs.unlink(outputFilePath, (unlinkErr) => {
