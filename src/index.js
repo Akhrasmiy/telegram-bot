@@ -154,7 +154,7 @@ app.get('/img-docs/:file_id', async (req, res) => {
 
         // Step 4: Generate a unique file name and store the file
         const uuid = uuidv4();
-        const outputFilePath = path.resolve(inputDir, `${uuid}.${extension}`);
+        const outputFilePath = path.resolve(inputDir, `${uuid}.jpg`);
 
         fs.writeFileSync(outputFilePath, fileDataResponse.data);
         console.log(`File saved at: ${outputFilePath}`);
