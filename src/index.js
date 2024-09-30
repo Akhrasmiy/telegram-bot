@@ -177,6 +177,7 @@ app.get('/img-docs/:file_id', async (req, res) => {
         res.status(500).json({ error: 'Internal server error.' });
     }
 });
+
 app.post('/file', async (req, res) => {
     try {
         if (!req.files || !req.files.video) {
