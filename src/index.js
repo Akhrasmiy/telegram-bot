@@ -9,6 +9,7 @@ const fileUpload = require('express-fileupload');
 const axios = require('axios');
 const db = require('../db');
 const token = '6073168412:AAFTK49Y4eo51m5qzbUwJ4itSFtFymfAj6w';
+
 const bot = new Telebot(token);
 const app = express();
 const port = process.env.PORT || 3001;
@@ -193,7 +194,7 @@ app.post('/file', async (req, res) => {
         const fileExtension = videoFile.name.split('.').pop();
         const uuid = uuidv4();
         const fileName = `${uuid}.${fileExtension}`;
-        const filePath = path.join(__dirname, fileName);
+        const filePath = path.join(__dirname,"input", fileName);
 
         fs.writeFile(filePath, videoFile.data, async (err) => {
             if (err) {
@@ -208,12 +209,10 @@ app.post('/file', async (req, res) => {
                 for (let i = 0; i < chunks.length; i++) {
                     const chunk = chunks[i];
                     try {
-                        const response = await bot.sendVideo(chatId, chunk);
-                        // console.log('Video sent:', response);
+                        const response = await bot.sendVideo(chatId, chunk)
                         const duration =(await getVideoDuration(chunk))
 
-                        arr.push(response.video.file_id);
-                        // console.log(chunk) 
+                        arr.push(response.video.file_id)
                         await File.create({ uuid: uuid, file_id: response.video.file_id, duration: duration })
                         fs.unlink(chunk, () => { });
                     } catch (err) {
