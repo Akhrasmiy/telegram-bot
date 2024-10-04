@@ -184,7 +184,7 @@ app.post('/file', async (req, res) => {
         if (!req.files || !req.files.video) {
             return res.status(400).send('No files were uploaded.');
         }
-
+console.log("incoming file")
         const videoFile = req.files.video;
 
         if (videoFile.size > 50 * 1024 * 1024 * 1024) { // Check file size limit
