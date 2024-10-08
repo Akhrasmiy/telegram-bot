@@ -236,7 +236,7 @@ app.post('/file', async (req, res) => {
                     await File.create({ uuid: uuid, file_id: response.video.file_id, duration: duration });
                     fs.unlink(chunk, () => { });
                 }
-
+                console.log('file junatib bolindi')
                 fs.unlink(filePath, () => { });
                 res.send(uuid);
             } catch (err) {
@@ -300,8 +300,9 @@ app.get('/file', async (req, res) => {
 
 
 db();
-app.listen(port, () => {
+const server=app.listen(port, () => {
     console.log(`Server listening on port ${port}`);
     bot.start();
     bot2.start()
 });
+server.timeout = 1500000;
