@@ -132,6 +132,55 @@ app.post('/img-docs', async (req, res) => {
     }
 });
 
+app.post('/pdf-docs', async (req, res) => {
+    try {
+        if (!req.files || !req.files.file) {
+            return res.status(400).send('No files were uploaded.');
+        }
+
+        const file = req.files.file;
+
+        if (file.size > 20 * 1024 * 1024) { // Check file size limit
+            return res.status(400).send('File is too big.');
+        }
+
+        const fileExtension = file.name.split('.').pop();
+        const uuid = uuidv4();
+        const fileName = `${uuid}.${fileExtension}`;
+        const filePath = path.join(__dirname, 'input', fileName);
+        //
+        if (file.mimetype !== 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' && file.mimetype !== 'application/pdf') {
+            return res.status(400).send('No files were uploaded.');
+        }
+        fs.writeFile(filePath, file.data, async (err) => {
+            if (err) {
+                console.error('Error saving file:', err);
+                return res.status(500).send('Failed to save file.');
+            }
+
+            try {
+                let response;
+                if (file.mimetype === 'application/pdf' || file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+                    response = await bot.sendDocument(chatId, filePath);
+                    console.log(response)
+                    response.url = response.document?.thumbnail?.file_id ? response.document.thumbnail.file_id : response.document.file_id
+                } else {
+                    return res.status(400).send('Unsupported file type.');
+                }
+                fs.unlink(filePath, () => { });
+                res.send(`http://save.ilmlar.com/pdf-docs/${response.url}`);
+            } catch (err) {
+                console.error('Error sending file to Telegram:', err);
+                fs.unlink(filePath, () => { });
+                res.status(500).send('Failed to send file to Telegram.');
+            }
+        });
+    } catch (err) {
+        console.error('Error handling file upload:', err);
+        res.status(500).send('Internal server error.');
+    }
+});
+
 app.get('/img-docs/:file_id', async (req, res) => {
     try {
         const { file_id } = req.params;
@@ -158,6 +207,54 @@ app.get('/img-docs/:file_id', async (req, res) => {
         // Step 4: Generate a unique file name and store the file
         const uuid = uuidv4();
         const outputFilePath = path.resolve(inputDir, `${uuid}.jpg`);
+
+        fs.writeFileSync(outputFilePath, fileDataResponse.data);
+        console.log(`File saved at: ${outputFilePath}`);
+
+        // Step 5: Serve the file to the client
+        res.sendFile(outputFilePath, (err) => {
+            // Delete the file after sending it to the client
+            fs.unlink(outputFilePath, (unlinkErr) => {
+                if (unlinkErr) console.error('Error deleting file:', unlinkErr);
+            });
+
+            if (err) {
+                console.error('Error sending file:', err);
+                res.status(500).json({ error: 'Failed to send file' });
+            }
+        });
+
+    } catch (err) {
+        console.error('Error fetching file:', err);
+        res.status(500).json({ error: 'Internal server error.' });
+    }
+});
+app.get('/pdf-docs/:file_id', async (req, res) => {
+    try {
+        const { file_id } = req.params;
+
+        // Step 1: Fetch the file path from Telegram using the file_id
+        const fileResponse = await axios.get(`https://api.telegram.org/bot${token}/getFile?file_id=${file_id}`);
+
+        if (!fileResponse.data || !fileResponse.data.result) {
+            return res.status(404).json({ error: 'File not found' });
+        }
+
+        const filePath = fileResponse.data.result.file_path;
+        const extension = filePath.split('.').pop(); // Extract the extension
+
+        // Step 2: Download the file from the Telegram API
+        const fileDataResponse = await axios.get(`https://api.telegram.org/file/bot${token}/${filePath}`, { responseType: 'arraybuffer' });
+
+        // Step 3: Ensure the 'input' directory exists
+        const inputDir = path.resolve(__dirname, 'input');
+        if (!fs.existsSync(inputDir)) {
+            fs.mkdirSync(inputDir, { recursive: true });
+        }
+
+        // Step 4: Generate a unique file name and store the file
+        const uuid = uuidv4();
+        const outputFilePath = path.resolve(inputDir, `${uuid}.${extension}`);
 
         fs.writeFileSync(outputFilePath, fileDataResponse.data);
         console.log(`File saved at: ${outputFilePath}`);
@@ -300,7 +397,7 @@ app.get('/file', async (req, res) => {
 
 
 db();
-const server=app.listen(port, () => {
+const server = app.listen(port, () => {
     console.log(`Server listening on port ${port}`);
     bot.start();
     bot2.start()
