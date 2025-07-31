@@ -8,7 +8,7 @@ const { promises: fsPromises } = require('fs');
 const fileUpload = require('express-fileupload');
 const axios = require('axios');
 const db = require('../db');
-const token = '6073168412:AAFTK49Y4eo51m5qzbUwJ4itSFtFymfAj6w';
+const token = '5548558539:AAHz5IUlbnK-6gBO-ZY8PdnvTtr6BWrvwzE';
 const token2 = '7378618098:AAFdJf7Zcjz1t1kRRl0VRoZ0h64D229ogS4';
 
 const bot = new Telebot(token);
