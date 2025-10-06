@@ -10,9 +10,11 @@ const axios = require('axios');
 const db = require('../db');
 const token = '5548558539:AAHz5IUlbnK-6gBO-ZY8PdnvTtr6BWrvwzE';
 const token2 = '7378618098:AAFdJf7Zcjz1t1kRRl0VRoZ0h64D229ogS4';
+const token3 = '1773215702:AAFik8HlsFLk7E2EtgKrFQCh-ZsXOjYSRWo'; // Add your third bot token here
 
 const bot = new Telebot(token);
 const bot2 = new Telebot(token2);
+const bot3 = new Telebot(token3);
 const app = express();
 const port = process.env.PORT || 3001;
 const chatId = '-1002195971113';
@@ -311,6 +313,7 @@ app.post('/file', async (req, res) => {
                     const chunk = chunks[i];
                     let response;
 
+                    // Try sending with bots in sequence: bot, bot2, bot3
                     try {
                         // Try sending with the first bot
                         response = await bot.sendVideo(chatId, chunk);
@@ -322,8 +325,15 @@ app.post('/file', async (req, res) => {
                             response = await bot2.sendVideo(chatId, chunk);
                         } catch (bot2Err) {
                             console.error('Error sending video with bot2:', bot2Err);
-                            fs.unlink(chunk, () => { });
-                            return res.status(500).send('Failed to send file to Telegram.');
+
+                            // If the second bot fails, try with the third bot
+                            try {
+                                response = await bot3.sendVideo(chatId, chunk);
+                            } catch (bot3Err) {
+                                console.error('Error sending video with bot3:', bot3Err);
+                                fs.unlink(chunk, () => { });
+                                return res.status(500).send('Failed to send file to Telegram.');
+                            }
                         }
                     }
 
@@ -373,9 +383,47 @@ app.get('/file', async (req, res) => {
     try {
         const file_id = req.query.file_id;
         const uuid = uuidv4();
-        const file = await axios.get(`https://api.telegram.org/bot${token}/getFile?file_id=${file_id}`);
-        const filePath = file.data.result.file_path;
-        const filedata = await axios.get(`https://api.telegram.org/file/bot${token}/${filePath}`, { responseType: 'arraybuffer' });
+        const tokens = [token3, token2, token]; // Try in order: 3rd, 2nd, 1st
+        let file = null;
+        let filePath = null;
+
+        // Try to get file info with each token in sequence
+        for (const currentToken of tokens) {
+            try {
+                file = await axios.get(`https://api.telegram.org/bot${currentToken}/getFile?file_id=${file_id}`);
+                if (file.data && file.data.result) {
+                    filePath = file.data.result.file_path;
+                    break; // Success, use this token
+                }
+            } catch (getErr) {
+                console.error(`Error getting file with token ${currentToken}:`, getErr);
+                continue; // Try next token
+            }
+        }
+
+        if (!file || !filePath) {
+            return res.status(404).json({ error: 'File not found with any bot' });
+        }
+
+        // Now download using the same token that succeeded
+        let filedata = null;
+        for (const currentToken of tokens) {
+            try {
+                // Only try download with the token that got the file path
+                if (currentToken === file.config.url.match(/bot(.*)\//)[1]) {
+                    filedata = await axios.get(`https://api.telegram.org/file/bot${currentToken}/${filePath}`, { responseType: 'arraybuffer' });
+                    break;
+                }
+            } catch (downloadErr) {
+                console.error(`Error downloading file with token ${currentToken}:`, downloadErr);
+                continue;
+            }
+        }
+
+        if (!filedata) {
+            return res.status(500).json({ error: 'Failed to download file' });
+        }
+
         const outputpath = `${uuid}.mp4`;
         const outputFilePath = path.resolve(__dirname, 'input', outputpath); // Ensure the path is absolute
 
@@ -400,6 +448,7 @@ db();
 const server = app.listen(port, () => {
     console.log(`Server listening on port ${port}`);
     bot.start();
-    bot2.start()
+    bot2.start();
+    bot3.start();
 });
 server.timeout = 1500000;
