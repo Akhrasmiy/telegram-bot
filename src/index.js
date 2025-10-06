@@ -17,7 +17,8 @@ const bot2 = new Telebot(token2);
 const bot3 = new Telebot(token3);
 const app = express();
 const port = process.env.PORT || 3001;
-const chatId = '-1002195971113';
+const chatId = '-1003179717428';
+const oldChatId = '-1002195971113'; // Old chat ID for reference, but not directly used in retrieval
 const ffmpeg = require('fluent-ffmpeg');
 const File = require('./mongomodel');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
@@ -83,6 +84,31 @@ function splitVideo(inputPath, chunkSizeMB) {
         });
     });
 }
+
+async function sendWithBots(filePath, mimetype, chatId) {
+    const bots = [bot, bot2, bot3];
+    const tokens = [token, token2, token3];
+
+    for (let i = 0; i < bots.length; i++) {
+        try {
+            let response;
+            if (mimetype.startsWith('image/')) {
+                response = await bots[i].sendPhoto(chatId, filePath);
+                return { response, token: tokens[i], fileId: response.photo[response.photo.length - 1].file_id };
+            } else if (mimetype === 'application/pdf' || mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+                response = await bots[i].sendDocument(chatId, filePath);
+                const fileId = response.document.file_id; // Use document.file_id primarily
+                return { response, token: tokens[i], fileId };
+            }
+        } catch (err) {
+            console.error(`Error sending with bot ${i + 1}:`, err);
+            if (i === bots.length - 1) {
+                throw err;
+            }
+        }
+    }
+}
+
 app.post('/img-docs', async (req, res) => {
     try {
         if (!req.files || !req.files.file) {
@@ -109,19 +135,9 @@ app.post('/img-docs', async (req, res) => {
             }
 
             try {
-                let response;
-                if (file.mimetype.startsWith('image/')) {
-                    response = await bot.sendPhoto(chatId, filePath);
-                    console.log(response.photo)
-                    response.url = response.photo.at(-1).file_id
-                } else if (file.mimetype === 'application/pdf') {
-                    response = await bot.sendDocument(chatId, filePath);
-                    response.url = response.document.thumbnail.file_id
-                } else {
-                    return res.status(400).send('Unsupported file type.');
-                }
+                const { fileId } = await sendWithBots(filePath, file.mimetype, chatId);
                 fs.unlink(filePath, () => { });
-                res.send(`http://save.ilmlar.com/img-docs/${response.url}`);
+                res.send(`http://save.ilmlar.com/img-docs/${fileId}`);
             } catch (err) {
                 console.error('Error sending file to Telegram:', err);
                 fs.unlink(filePath, () => { });
@@ -161,16 +177,9 @@ app.post('/pdf-docs', async (req, res) => {
             }
 
             try {
-                let response;
-                if (file.mimetype === 'application/pdf' || file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-                    response = await bot.sendDocument(chatId, filePath);
-                    console.log(response)
-                    response.url = response.document?.thumbnail?.file_id ? response.document.thumbnail.file_id : response.document.file_id
-                } else {
-                    return res.status(400).send('Unsupported file type.');
-                }
+                const { fileId } = await sendWithBots(filePath, file.mimetype, chatId);
                 fs.unlink(filePath, () => { });
-                res.send(`http://save.ilmlar.com/pdf-docs/${response.url}`);
+                res.send(`http://save.ilmlar.com/pdf-docs/${fileId}`);
             } catch (err) {
                 console.error('Error sending file to Telegram:', err);
                 fs.unlink(filePath, () => { });
@@ -183,37 +192,56 @@ app.post('/pdf-docs', async (req, res) => {
     }
 });
 
+async function getFileWithBots(file_id, tokens) {
+    // Try in order: old first (token, token2, token3)
+    for (const currentToken of tokens) {
+        try {
+            const fileResponse = await axios.get(`https://api.telegram.org/bot${currentToken}/getFile?file_id=${file_id}`);
+            if (fileResponse.data && fileResponse.data.result) {
+                return {
+                    filePath: fileResponse.data.result.file_path,
+                    token: currentToken,
+                    response: fileResponse
+                };
+            }
+        } catch (getErr) {
+            console.error(`Error getting file with token ${currentToken}:`, getErr);
+            continue;
+        }
+    }
+    return null;
+}
+
 app.get('/img-docs/:file_id', async (req, res) => {
     try {
         const { file_id } = req.params;
+        const tokens = [token, token2, token3]; // Old first: token1, token2, token3
 
-        // Step 1: Fetch the file path from Telegram using the file_id
-        const fileResponse = await axios.get(`https://api.telegram.org/bot${token}/getFile?file_id=${file_id}`);
-
-        if (!fileResponse.data || !fileResponse.data.result) {
-            return res.status(404).json({ error: 'File not found' });
+        const fileInfo = await getFileWithBots(file_id, tokens);
+        if (!fileInfo) {
+            return res.status(404).json({ error: 'File not found with any bot' });
         }
 
-        const filePath = fileResponse.data.result.file_path;
-        const extension = filePath.split('.').pop(); // Extract the extension
+        const { filePath, token: successfulToken } = fileInfo;
 
-        // Step 2: Download the file from the Telegram API
-        const fileDataResponse = await axios.get(`https://api.telegram.org/file/bot${token}/${filePath}`, { responseType: 'arraybuffer' });
+        // Download using the successful token
+        const fileDataResponse = await axios.get(`https://api.telegram.org/file/bot${successfulToken}/${filePath}`, { responseType: 'arraybuffer' });
 
-        // Step 3: Ensure the 'input' directory exists
+        // Ensure the 'input' directory exists
         const inputDir = path.resolve(__dirname, 'input');
         if (!fs.existsSync(inputDir)) {
             fs.mkdirSync(inputDir, { recursive: true });
         }
 
-        // Step 4: Generate a unique file name and store the file
+        // Generate a unique file name and store the file
         const uuid = uuidv4();
-        const outputFilePath = path.resolve(inputDir, `${uuid}.jpg`);
+        const extension = filePath.split('.').pop();
+        const outputFilePath = path.resolve(inputDir, `${uuid}.${extension === 'jpg' ? 'jpg' : extension}`); // Default to jpg for images
 
         fs.writeFileSync(outputFilePath, fileDataResponse.data);
         console.log(`File saved at: ${outputFilePath}`);
 
-        // Step 5: Serve the file to the client
+        // Serve the file to the client
         res.sendFile(outputFilePath, (err) => {
             // Delete the file after sending it to the client
             fs.unlink(outputFilePath, (unlinkErr) => {
@@ -231,37 +259,37 @@ app.get('/img-docs/:file_id', async (req, res) => {
         res.status(500).json({ error: 'Internal server error.' });
     }
 });
+
 app.get('/pdf-docs/:file_id', async (req, res) => {
     try {
         const { file_id } = req.params;
+        const tokens = [token, token2, token3]; // Old first: token1, token2, token3
 
-        // Step 1: Fetch the file path from Telegram using the file_id
-        const fileResponse = await axios.get(`https://api.telegram.org/bot${token}/getFile?file_id=${file_id}`);
-
-        if (!fileResponse.data || !fileResponse.data.result) {
-            return res.status(404).json({ error: 'File not found' });
+        const fileInfo = await getFileWithBots(file_id, tokens);
+        if (!fileInfo) {
+            return res.status(404).json({ error: 'File not found with any bot' });
         }
 
-        const filePath = fileResponse.data.result.file_path;
-        const extension = filePath.split('.').pop(); // Extract the extension
+        const { filePath, token: successfulToken } = fileInfo;
 
-        // Step 2: Download the file from the Telegram API
-        const fileDataResponse = await axios.get(`https://api.telegram.org/file/bot${token}/${filePath}`, { responseType: 'arraybuffer' });
+        // Download using the successful token
+        const fileDataResponse = await axios.get(`https://api.telegram.org/file/bot${successfulToken}/${filePath}`, { responseType: 'arraybuffer' });
 
-        // Step 3: Ensure the 'input' directory exists
+        // Ensure the 'input' directory exists
         const inputDir = path.resolve(__dirname, 'input');
         if (!fs.existsSync(inputDir)) {
             fs.mkdirSync(inputDir, { recursive: true });
         }
 
-        // Step 4: Generate a unique file name and store the file
+        // Generate a unique file name and store the file
         const uuid = uuidv4();
+        const extension = filePath.split('.').pop();
         const outputFilePath = path.resolve(inputDir, `${uuid}.${extension}`);
 
         fs.writeFileSync(outputFilePath, fileDataResponse.data);
         console.log(`File saved at: ${outputFilePath}`);
 
-        // Step 5: Serve the file to the client
+        // Serve the file to the client
         res.sendFile(outputFilePath, (err) => {
             // Delete the file after sending it to the client
             fs.unlink(outputFilePath, (unlinkErr) => {
@@ -313,7 +341,7 @@ app.post('/file', async (req, res) => {
                     const chunk = chunks[i];
                     let response;
 
-                    // Try sending with bots in sequence: bot, bot2, bot3
+                    // Try sending with bots in sequence: bot, bot2, bot3 (old first)
                     try {
                         // Try sending with the first bot
                         response = await bot.sendVideo(chatId, chunk);
@@ -383,72 +411,16 @@ app.get('/file', async (req, res) => {
     try {
         const file_id = req.query.file_id;
         const uuid = uuidv4();
-        const tokens = [token3, token2, token]; // Try in order: 3rd, 2nd, 1st
-        let file = null;
-        let filePath = null;
+        const tokens = [token, token2, token3]; // Old first: token1, token2, token3
 
-        // Try to get file info with each token in sequence
-        for (const currentToken of tokens) {
-            try {
-                file = await axios.get(`https://api.telegram.org/bot${currentToken}/getFile?file_id=${file_id}`);
-                if (file.data && file.data.result) {
-                    filePath = file.data.result.file_path;
-                    break; // Success, use this token
-                }
-            } catch (getErr) {
-                console.error(`Error getting file with token ${currentToken}:`, getErr);
-                continue; // Try next token
-            }
-        }
-
-        if (!file || !filePath) {
+        const fileInfo = await getFileWithBots(file_id, tokens);
+        if (!fileInfo) {
             return res.status(404).json({ error: 'File not found with any bot' });
         }
 
-        // Now download using the same token that succeeded
-        let filedata = null;
-        for (const currentToken of tokens) {
-            try {
-                // Only try download with the token that got the file path
-                if (currentToken === file.config.url.match(/bot(.*)\//)[1]) {
-                    filedata = await axios.get(`https://api.telegram.org/file/bot${currentToken}/${filePath}`, { responseType: 'arraybuffer' });
-                    break;
-                }
-            } catch (downloadErr) {
-                console.error(`Error downloading file with token ${currentToken}:`, downloadErr);
-                continue;
-            }
-        }
+        const { filePath, token: successfulToken } = fileInfo;
 
-        if (!filedata) {
-            return res.status(500).json({ error: 'Failed to download file' });
-        }
+        // Download using the successful token
+        const fileDataResponse = await axios.get(`https://api.telegram.org/file/bot${successfulToken}/${filePath}`, { responseType: 'arraybuffer' });
 
-        const outputpath = `${uuid}.mp4`;
-        const outputFilePath = path.resolve(__dirname, 'input', outputpath); // Ensure the path is absolute
-
-        fs.writeFileSync(outputFilePath, filedata.data);
-        console.log(outputFilePath)
-        res.sendFile(outputFilePath, (err) => {
-            fs.unlink(outputFilePath, () => { })
-            if (err) {
-                console.error('Error sending file:', err);
-                res.status(500).json({ error: 'Failed to send file' });
-            }
-        });
-    } catch (error) {
-        console.error('Error merging videos:', error);
-        res.status(500).json({ error: 'Failed to merge videos' });
-    }
-});
-
-
-
-db();
-const server = app.listen(port, () => {
-    console.log(`Server listening on port ${port}`);
-    bot.start();
-    bot2.start();
-    bot3.start();
-});
-server.timeout = 1500000;
+        const outputpath
