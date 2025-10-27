@@ -33,6 +33,48 @@ app.use(fileUpload({
     limits: { fileSize: 50 * 1024 * 1024 * 1024 } // 50 GB limit
 }));
 
+// AWS SDK import qilish
+const AWS = require('aws-sdk');
+const dotenv = require('dotenv'); // npm install dotenv
+dotenv.config();
+
+// S3 konfiguratsiyasi ( .env faylida saqlang: AWS_ACCESS_KEY_ID=your_key, AWS_SECRET_ACCESS_KEY=your_secret, AWS_REGION=eu-central-1 )
+AWS.config.update({
+    accessKeyId: 'AKIAQVNJF56PAHDUWZWX',
+    secretAccessKey: '9vUDX9a6PWKRLVDriL9PRKr2CW2/PAO18WDkkAss',
+    region: 'eu-north-1' // masalan, 'eu-central-1'
+});
+
+const s3 = new AWS.S3();
+
+// Faylni S3 ga yuklash funksiyasi
+async function uploadToS3(fileBuffer, fileName, bucketName, contentType, acl = 'public-read') {
+    const params = {
+        Bucket: bucketName,
+        Key: fileName, // Papka qo'shish mumkin, masalan: 'images/' + fileName
+        Body: fileBuffer,
+        ContentType: contentType,
+        ACL: acl // 'public-read' agar umumiy bo'lsa; 'private' qilish mumkin
+    };
+
+    try {
+        const result = await s3.upload(params).promise();
+        return result.Location; // S3 URL qaytaradi
+    } catch (err) {
+        console.error('S3 yuklash xatosi:', err);
+        throw err;
+    }
+}
+
+// Faylni S3 dan yuklab olish uchun presigned URL olish funksiyasi (private fayllar uchun)
+async function getPresignedUrl(bucketName, fileKey, expiresIn = 3600) { // 1 soat
+    const params = {
+        Bucket: bucketName,
+        Key: fileKey,
+        Expires: expiresIn
+    };
+    return s3.getSignedUrlPromise('getObject', params);
+}
 
 async function getVideoDuration(filePath) {
     return new Promise((resolve, reject) => {
@@ -115,38 +157,17 @@ app.post('/img-docs', async (req, res) => {
 
         const fileExtension = file.name.split('.').pop();
         const uuid = uuidv4();
-        const fileName = `${uuid}.${fileExtension}`;
-        const filePath = path.join(__dirname, 'input', fileName);
+        const fileName = `images/${uuid}.${fileExtension}`; // Papka qo'shish
         if (!file.mimetype.startsWith('image/') && file.mimetype !== 'application/pdf') {
             return res.status(400).send('No files were uploaded.');
         }
-        fs.writeFile(filePath, file.data, async (err) => {
-            if (err) {
-                console.error('Error saving file:', err);
-                return res.status(500).send('Failed to save file.');
-            }
 
-            try {
-                const bots = [bot, bot2, bot3];
-                let response;
-                if (file.mimetype.startsWith('image/')) {
-                    response = await sendWithBots(bots, newChatId, filePath, true);
-                    console.log(response.photo)
-                    response.url = response.photo.at(-1).file_id
-                } else if (file.mimetype === 'application/pdf') {
-                    response = await sendWithBots(bots, newChatId, filePath, false);
-                    response.url = response.document.thumbnail.file_id
-                } else {
-                    return res.status(400).send('Unsupported file type.');
-                }
-                fs.unlink(filePath, () => { });
-                res.send(`http://save.ilmlar.com/img-docs/${response.url}`);
-            } catch (err) {
-                console.error('Error sending file to Telegram:', err);
-                fs.unlink(filePath, () => { });
-                res.status(500).send('Failed to send file to Telegram.');
-            }
-        });
+        // S3 ga yuklash
+        const bucketName = 'ilmlar-images-2025-uz'; // O'zingizning bucket nomingizni qo'ying, masalan 'ilmlar-images-2025-uz'
+        const s3Url = await uploadToS3(file.data, fileName, bucketName, file.mimetype);
+
+        // Faylni lokal saqlash shart emas, to'g'ridan-to'g'ri bufferdan yuklangan
+        res.send(s3Url); // S3 URL qaytaradi, masalan: https://your-bucket-name.s3.eu-central-1.amazonaws.com/images/uuid.jpg
     } catch (err) {
         console.error('Error handling file upload:', err);
         res.status(500).send('Internal server error.');
@@ -167,162 +188,47 @@ app.post('/pdf-docs', async (req, res) => {
 
         const fileExtension = file.name.split('.').pop();
         const uuid = uuidv4();
-        const fileName = `${uuid}.${fileExtension}`;
-        const filePath = path.join(__dirname, 'input', fileName);
-        //
+        const fileName = `docs/${uuid}.${fileExtension}`; // Papka qo'shish
         if (file.mimetype !== 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' && file.mimetype !== 'application/pdf') {
             return res.status(400).send('No files were uploaded.');
         }
-        fs.writeFile(filePath, file.data, async (err) => {
-            if (err) {
-                console.error('Error saving file:', err);
-                return res.status(500).send('Failed to save file.');
-            }
 
-            try {
-                const bots = [bot, bot2, bot3];
-                let response;
-                if (file.mimetype === 'application/pdf' || file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-                    response = await sendWithBots(bots, newChatId, filePath, false);
-                    console.log(response)
-                    response.url = response.document?.thumbnail?.file_id ? response.document.thumbnail.file_id : response.document.file_id
-                } else {
-                    return res.status(400).send('Unsupported file type.');
-                }
-                fs.unlink(filePath, () => { });
-                res.send(`http://save.ilmlar.com/pdf-docs/${response.url}`);
-            } catch (err) {
-                console.error('Error sending file to Telegram:', err);
-                fs.unlink(filePath, () => { });
-                res.status(500).send('Failed to send file to Telegram.');
-            }
-        });
+        // S3 ga yuklash
+        const bucketName = 'ilmlar-images-2025-uz'; // O'zingizning bucket nomingizni qo'ying
+        const s3Url = await uploadToS3(file.data, fileName, bucketName, file.mimetype);
+
+        res.send(s3Url);
     } catch (err) {
         console.error('Error handling file upload:', err);
         res.status(500).send('Internal server error.');
     }
 });
 
-async function getFileFromBots(tokens, file_id) {
-    for (const currentToken of tokens) {
-        try {
-            const fileResponse = await axios.get(`https://api.telegram.org/bot${currentToken}/getFile?file_id=${file_id}`);
-            if (fileResponse.data && fileResponse.data.result) {
-                return {
-                    filePath: fileResponse.data.result.file_path,
-                    token: currentToken
-                };
-            }
-        } catch (getErr) {
-            console.error(`Error getting file with token ${currentToken}:`, getErr);
-            continue;
-        }
-    }
-    return null;
-}
-
-app.get('/img-docs/:file_id', async (req, res) => {
+// /img-docs/:file_id endpointini olib tashlash yoki presigned URL bilan yangilash
+app.get('/img-docs/:file_key', async (req, res) => {
     try {
-        const { file_id } = req.params;
-        const tokens = [token, token2, token3]; // Try old bots first (assuming old files with them), then new
+        const { file_key } = req.params; // Endi file_id emas, S3 key (masalan, images/uuid.jpg)
+        const bucketName = 'ilmlar-images-2025-uz';
 
-        const fileInfo = await getFileFromBots(tokens, file_id);
-        if (!fileInfo) {
-            return res.status(404).json({ error: 'File not found with any bot' });
-        }
+        // Presigned URL olish (agar ACL private bo'lsa)
+        const url = await getPresignedUrl(bucketName, file_key);
 
-        const { filePath, token: successfulToken } = fileInfo;
-        const extension = filePath.split('.').pop(); // Extract the extension
-
-        // Download the file from the Telegram API
-        let filedata;
-        try {
-            filedata = await axios.get(`https://api.telegram.org/file/bot${successfulToken}/${filePath}`, { responseType: 'arraybuffer' });
-        } catch (downloadErr) {
-            console.error(`Error downloading file with token ${successfulToken}:`, downloadErr);
-            return res.status(500).json({ error: 'Failed to download file' });
-        }
-
-        // Ensure the 'input' directory exists
-        const inputDir = path.resolve(__dirname, 'input');
-        if (!fs.existsSync(inputDir)) {
-            fs.mkdirSync(inputDir, { recursive: true });
-        }
-
-        // Generate a unique file name and store the file
-        const uuid = uuidv4();
-        const outputFilePath = path.resolve(inputDir, `${uuid}.jpg`);
-
-        fs.writeFileSync(outputFilePath, filedata.data);
-        console.log(`File saved at: ${outputFilePath}`);
-
-        // Serve the file to the client
-        res.sendFile(outputFilePath, (err) => {
-            // Delete the file after sending it to the client
-            fs.unlink(outputFilePath, (unlinkErr) => {
-                if (unlinkErr) console.error('Error deleting file:', unlinkErr);
-            });
-
-            if (err) {
-                console.error('Error sending file:', err);
-                res.status(500).json({ error: 'Failed to send file' });
-            }
-        });
-
+        // Redirect qilish yoki to'g'ridan-to'g'ri yuklab olish
+        res.redirect(url);
     } catch (err) {
         console.error('Error fetching file:', err);
         res.status(500).json({ error: 'Internal server error.' });
     }
 });
 
-app.get('/pdf-docs/:file_id', async (req, res) => {
+// /pdf-docs/:file_key uchun ham shunga o'xshash
+app.get('/pdf-docs/:file_key', async (req, res) => {
     try {
-        const { file_id } = req.params;
-        const tokens = [token, token2, token3]; // Try old bots first (assuming old files with them), then new
+        const { file_key } = req.params;
+        const bucketName = 'ilmlar-images-2025-uz';
 
-        const fileInfo = await getFileFromBots(tokens, file_id);
-        if (!fileInfo) {
-            return res.status(404).json({ error: 'File not found with any bot' });
-        }
-
-        const { filePath, token: successfulToken } = fileInfo;
-        const extension = filePath.split('.').pop(); // Extract the extension
-
-        // Download the file from the Telegram API
-        let filedata;
-        try {
-            filedata = await axios.get(`https://api.telegram.org/file/bot${successfulToken}/${filePath}`, { responseType: 'arraybuffer' });
-        } catch (downloadErr) {
-            console.error(`Error downloading file with token ${successfulToken}:`, downloadErr);
-            return res.status(500).json({ error: 'Failed to download file' });
-        }
-
-        // Ensure the 'input' directory exists
-        const inputDir = path.resolve(__dirname, 'input');
-        if (!fs.existsSync(inputDir)) {
-            fs.mkdirSync(inputDir, { recursive: true });
-        }
-
-        // Generate a unique file name and store the file
-        const uuid = uuidv4();
-        const outputFilePath = path.resolve(inputDir, `${uuid}.${extension}`);
-
-        fs.writeFileSync(outputFilePath, filedata.data);
-        console.log(`File saved at: ${outputFilePath}`);
-
-        // Serve the file to the client
-        res.sendFile(outputFilePath, (err) => {
-            // Delete the file after sending it to the client
-            fs.unlink(outputFilePath, (unlinkErr) => {
-                if (unlinkErr) console.error('Error deleting file:', unlinkErr);
-            });
-
-            if (err) {
-                console.error('Error sending file:', err);
-                res.status(500).json({ error: 'Failed to send file' });
-            }
-        });
-
+        const url = await getPresignedUrl(bucketName, file_key);
+        res.redirect(url);
     } catch (err) {
         console.error('Error fetching file:', err);
         res.status(500).json({ error: 'Internal server error.' });
@@ -358,17 +264,18 @@ app.post('/file', async (req, res) => {
                 const chunks = await splitVideo(filePath, 10); // Split into 10 MB chunks
                 console.log(chunks);
                 const arr = [];
-                const bots = [bot, bot2, bot3];
+                const bucketName = 'ilmlar-images-2025-uz'; // O'zingizning bucket nomingizni qo'ying
                 for (let i = 0; i < chunks.length; i++) {
                     const chunk = chunks[i];
-                    let response;
+                    const chunkName = `videos/${uuid}_part${i}.mp4`;
 
-                    response = await sendWithBots(bots, newChatId, chunk, false);
+                    // S3 ga yuklash (Telegram o'rniga)
+                    const s3Url = await uploadToS3(fs.readFileSync(chunk), chunkName, bucketName, 'video/mp4');
 
                     const duration = await getVideoDuration(chunk);
-                    arr.push(response.video.file_id);
+                    arr.push(s3Url);
 
-                    await File.create({ uuid: uuid, file_id: response.video.file_id, duration: duration });
+                    await File.create({ uuid: uuid, file_url: s3Url, duration: duration }); // file_id o'rniga file_url
                     fs.unlink(chunk, () => { });
                 }
                 console.log('file junatib bolindi')
@@ -396,8 +303,8 @@ app.get('/video', async (req, res) => {
         const files = await File.find({ uuid: uuid })
         const arr = []
         for (let i = 0; i < files.length; i++) {
-            const file_id = files[i].file_id;
-            arr.push({ url: `http://save.ilmlar.com/file?file_id=${file_id}`, duration: files[i].duration })
+            const file_url = files[i].file_url; // file_id o'rniga file_url
+            arr.push({ url: file_url, duration: files[i].duration }) // To'g'ridan-to'g'ri S3 URL
         }
 
         res.send(arr)
@@ -409,41 +316,14 @@ app.get('/video', async (req, res) => {
 
 app.get('/file', async (req, res) => {
     try {
-        const file_id = req.query.file_id;
-        const uuid = uuidv4();
-        const tokens = [token, token2, token3]; // Try old bots first
+        const file_key = req.query.file_key; // file_id o'rniga file_key (masalan, videos/uuid_part0.mp4)
+        const bucketName = 'ilmlar-images-2025-uz';
 
-        const fileInfo = await getFileFromBots(tokens, file_id);
-        if (!fileInfo) {
-            return res.status(404).json({ error: 'File not found with any bot' });
-        }
-
-        const { filePath, token: successfulToken } = fileInfo;
-
-        // Download the file from the Telegram API
-        let filedata;
-        try {
-            filedata = await axios.get(`https://api.telegram.org/file/bot${successfulToken}/${filePath}`, { responseType: 'arraybuffer' });
-        } catch (downloadErr) {
-            console.error(`Error downloading file with token ${successfulToken}:`, downloadErr);
-            return res.status(500).json({ error: 'Failed to download file' });
-        }
-
-        const outputpath = `${uuid}.mp4`;
-        const outputFilePath = path.resolve(__dirname, 'input', outputpath); // Ensure the path is absolute
-
-        fs.writeFileSync(outputFilePath, filedata.data);
-        console.log(outputFilePath)
-        res.sendFile(outputFilePath, (err) => {
-            fs.unlink(outputFilePath, () => { })
-            if (err) {
-                console.error('Error sending file:', err);
-                res.status(500).json({ error: 'Failed to send file' });
-            }
-        });
+        const url = await getPresignedUrl(bucketName, file_key);
+        res.redirect(url);
     } catch (error) {
-        console.error('Error merging videos:', error);
-        res.status(500).json({ error: 'Failed to merge videos' });
+        console.error('Error fetching file:', error);
+        res.status(500).json({ error: 'Failed to fetch file' });
     }
 });
 
