@@ -7,7 +7,6 @@ const fs = require('fs');
 const { promises: fsPromises } = require('fs');
 const fileUpload = require('express-fileupload');
 const axios = require('axios');
-const db = require('../db');
 const token = '5548558539:AAHz5IUlbnK-6gBO-ZY8PdnvTtr6BWrvwzE';
 const token2 = '7378618098:AAFdJf7Zcjz1t1kRRl0VRoZ0h64D229ogS4';
 const token3 = '1773215702:AAFik8HlsFLk7E2EtgKrFQCh-ZsXOjYSRWo'; // Add your third bot token here
@@ -327,9 +326,6 @@ app.get('/file', async (req, res) => {
     }
 });
 
-
-
-db();
 const server = app.listen(port, () => {
     console.log(`Server listening on port ${port}`);
     bot.start();
